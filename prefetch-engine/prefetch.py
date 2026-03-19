@@ -1,7 +1,10 @@
 import os
 import shutil
 import time
+import json
+from datetime import datetime, timezone
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 from typing import List
 
@@ -72,6 +75,146 @@ def run_simulated_ml_job(cache_dir: Path, hot_files: List[FileStat]) -> None:
 
     print(f"[ML JOB] cache hits={hits}, misses={misses}, total={len(hot_files)}")
 
+    # Note: kept as printing only in the original demo.
+
+
+@dataclass
+class ProcessedRecord:
+    """
+    A single processed output record for a consumed input object.
+
+    Output format is NDJSON (one JSON object per line).
+    """
+
+    job_id: str
+    input_uri: str
+    cache_hit: bool
+    processed_at_epoch: float
+
+
+def build_processed_records(job_id: str, cache_dir: Path, hot_files: List[FileStat]) -> List[ProcessedRecord]:
+    """
+    Build processed records from the ML job simulation.
+
+    In the real pipeline this would be the transformed/feature-enriched output.
+    """
+    cache_dir = Path(cache_dir)
+    now = time.time()
+
+    records: List[ProcessedRecord] = []
+    for f in hot_files:
+        src = Path(f.uri.replace("file://", ""))
+        cached = cache_dir / src.name
+        records.append(
+            ProcessedRecord(
+                job_id=job_id,
+                input_uri=f.uri,
+                cache_hit=cached.exists(),
+                processed_at_epoch=now,
+            )
+        )
+
+    return records
+
+
+def _utc_run_id() -> str:
+    # Example: run-20260319T104455Z
+    return datetime.now(timezone.utc).strftime("run-%Y%m%dT%H%M%SZ")
+
+
+def _env(name: str, default: str) -> str:
+    v = os.environ.get(name)
+    return v if v is not None and v != "" else default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    v = os.environ.get(name)
+    if v is None:
+        return default
+    v = v.strip().lower()
+    if v in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if v in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    return default
+
+
+def object_key_for_processed_records(*, run_id: str, part_id: int, prefix: str) -> str:
+    """
+    File naming convention for processed outputs in MinIO.
+
+    Key format:
+      {prefix}/processed/{run_id}/part-{part_id:05d}.jsonl
+    """
+    prefix = prefix.strip("/")
+    return f"{prefix}/processed/{run_id}/part-{part_id:05d}.jsonl"
+
+
+def _records_to_ndjson(records: List[ProcessedRecord]) -> bytes:
+    # One JSON object per line, no surrounding array wrapper.
+    lines = [json.dumps(r.__dict__, separators=(",", ":")) for r in records]
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def upload_processed_records_to_minio(records: List[ProcessedRecord]) -> str | None:
+    """
+    Upload NDJSON processed records to MinIO.
+
+    Returns the MinIO object key if upload was attempted, else None.
+    """
+    # If the user doesn't configure MinIO, don't fail the demo; just skip upload.
+    endpoint = os.environ.get("MINIO_ENDPOINT")
+    access_key = os.environ.get("MINIO_ACCESS_KEY")
+    secret_key = os.environ.get("MINIO_SECRET_KEY")
+    bucket = os.environ.get("MINIO_BUCKET", "processed")
+    prefix = os.environ.get("MINIO_PREFIX", "streamforge")
+
+    if not endpoint or not access_key or not secret_key:
+        print("[MINIO] Skipping upload (set MINIO_ENDPOINT/MINIO_ACCESS_KEY/MINIO_SECRET_KEY to enable).")
+        return None
+
+    try:
+        from minio import Minio
+    except ImportError as e:
+        raise RuntimeError(
+            "MinIO upload requested but `minio` dependency is missing. "
+            "Run: pip install -r requirements.txt in `prefetch-engine/`."
+        ) from e
+
+    secure = _env_bool("MINIO_SECURE", False)
+
+    client = Minio(
+        endpoint=endpoint,
+        access_key=access_key,
+        secret_key=secret_key,
+        secure=secure,
+    )
+
+    # Create bucket if needed (MinIO is forgiving; this keeps demo friction low).
+    if not client.bucket_exists(bucket):
+        client.make_bucket(bucket)
+
+    # Use job_id from the first record; fall back safely.
+    job_id = records[0].job_id if records else _utc_run_id()
+    part_id = int(os.environ.get("MINIO_PART_ID", "0"))
+
+    object_key = object_key_for_processed_records(run_id=job_id, part_id=part_id, prefix=prefix)
+    payload = _records_to_ndjson(records)
+
+    data_stream = BytesIO(payload)
+    content_type = "application/x-ndjson"
+
+    client.put_object(
+        bucket_name=bucket,
+        object_name=object_key,
+        data=data_stream,
+        length=len(payload),
+        content_type=content_type,
+    )
+
+    print(f"[MINIO] Uploaded processed records to bucket={bucket} key={object_key}")
+    return object_key
+
 
 def _build_demo_manifest(tmp_dir: Path) -> List[FileStat]:
     """
@@ -130,7 +273,13 @@ def main() -> None:
     prefetch_files(hot_files, cache_dir)
 
     print("[DEMO] running simulated ML job")
+    job_id = os.environ.get("STREAMFORGE_JOB_ID", _utc_run_id())
+    # Keep the original cache hit/miss reporting.
     run_simulated_ml_job(cache_dir, hot_files)
+
+    # Build and upload processed outputs (NDJSON).
+    records = build_processed_records(job_id=job_id, cache_dir=cache_dir, hot_files=hot_files)
+    upload_processed_records_to_minio(records)
 
 
 if __name__ == "__main__":
