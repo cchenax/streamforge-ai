@@ -1,0 +1,26 @@
+{
+  "name": "debezium-mysql",
+  "config": {
+    "connector.class": "io.debezium.connector.mysql.MySqlConnector",
+    "tasks.max": "1",
+
+    "database.hostname": "mysql",
+    "database.port": "3306",
+    "database.user": "debezium",
+    "database.password": "debezium",
+
+    "database.server.id": "184054",
+    "database.server.name": "streamforge",
+    "database.include.list": "streamforge",
+    "table.include.list": "streamforge.customers",
+
+    "snapshot.mode": "initial",
+
+    "tombstones.on.delete": "true",
+    "include.schema.changes": "true",
+
+    "database.history.kafka.bootstrap.servers": "kafka:9092",
+    "database.history.kafka.topic": "debezium_schema_history.streamforge"
+  }
+}
+
