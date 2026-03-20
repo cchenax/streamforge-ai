@@ -72,6 +72,8 @@ v0.1 will include:
 - one MinIO sink
 - one end-to-end Docker Compose demo
 
+For the initial CDC demo, see `deploy/cdc-mysql-kafka-debezium/`.
+
 ## 8. Future improvements
 
 - Iceberg sink support
