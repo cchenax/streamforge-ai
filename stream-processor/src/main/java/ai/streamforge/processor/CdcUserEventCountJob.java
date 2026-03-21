@@ -27,11 +27,11 @@ public class CdcUserEventCountJob {
 
     public static void main(String[] args) throws Exception {
         ParameterTool params = ParameterTool.fromArgs(args);
-        String bootstrapServers = params.get("bootstrap.servers", "kafka:9092");
+        String bootstrapServers = params.get("bootstrap.servers", "localhost:9092");
         String inputTopic = params.get("input.topic", "streamforge.streamforge.customers");
         String outputTopic = params.get("output.topic", "streamforge.features.user_event_counts");
         String groupId = params.get("group.id", "streamforge-flink-user-count");
-        long windowSeconds = params.getLong("window.seconds", 30L);
+        long windowSeconds = params.getLong("window.seconds", 60L);
         String startupMode = params.get("startup.mode", "earliest");
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -75,6 +75,7 @@ public class CdcUserEventCountJob {
 
         featureOutput.sinkTo(sink).name("kafka-feature-sink");
         featureOutput.print("processed-feature");
+
         env.execute("StreamForge CDC User Event Count Job");
     }
 
@@ -98,6 +99,7 @@ public class CdcUserEventCountJob {
 
             String op = payload.path("op").asText("");
             if (op.isEmpty() || "d".equals(op)) {
+                // For this feature job we count create/update/read events only.
                 return;
             }
 
@@ -106,6 +108,7 @@ public class CdcUserEventCountJob {
                 return;
             }
 
+            // Try common user identifier fields first, then fallback to id.
             String userId = firstNonEmpty(
                     textOrEmpty(after, "user_id"),
                     textOrEmpty(after, "uid"),
