@@ -1,0 +1,151 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: streamforge
+      MYSQL_USER: debezium
+      MYSQL_PASSWORD: debezium
+      MYSQL_ROOT_PASSWORD: root
+    command:
+      [
+        "--server-id=184054",
+        "--log-bin=mysql-bin",
+        "--binlog-format=ROW",
+        "--binlog-row-image=FULL",
+        "--default-authentication-plugin=mysql_native_password"
+      ]
+    ports:
+      - "3306:3306"
+    volumes:
+      - ../cdc-mysql-kafka-debezium/mysql/init:/docker-entrypoint-initdb.d:ro
+
+  connect:
+    image: debezium/connect:2.5
+    depends_on:
+      - kafka
+      - mysql
+    ports:
+      - "8083:8083"
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: kafka:9092
+      CONNECT_REST_PORT: 8083
+      CONNECT_REST_ADVERTISED_HOST_NAME: connect
+      CONNECT_GROUP_ID: connect-debezium
+      CONNECT_CONFIG_STORAGE_TOPIC: connect-configs
+      CONNECT_OFFSET_STORAGE_TOPIC: connect-offsets
+      CONNECT_STATUS_STORAGE_TOPIC: connect-statuses
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_PLUGIN_PATH: /kafka/connect/plugins
+      CONNECT_LOG4J_ROOT_LOGLEVEL: INFO
+    volumes:
+      - ./connector-config.json:/tmp/connector-config.json:ro
+
+  connector-setup:
+    image: curlimages/curl:8.7.1
+    depends_on:
+      - connect
+    volumes:
+      - ./connector-config.json:/connector-config.json:ro
+    command: >
+      sh -c '
+        for i in $(seq 1 60); do
+          if curl -sS http://connect:8083/connectors >/dev/null 2>&1; then
+            break;
+          fi;
+          sleep 1;
+        done;
+        curl -sS -X POST -H "Content-Type: application/json" \
+          --data @/connector-config.json \
+          http://connect:8083/connectors || true;
+        echo "Connector setup attempted."
+      '
+
+  jobmanager:
+    image: flink:1.18.1-java17
+    command: jobmanager
+    ports:
+      - "8081:8081"
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+    depends_on:
+      - kafka
+    volumes:
+      - ../../stream-processor/target:/opt/flink/usrlib:ro
+
+  taskmanager:
+    image: flink:1.18.1-java17
+    command: taskmanager
+    depends_on:
+      - jobmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 2
+
+  minio:
+    image: minio/minio:RELEASE.2024-02-09T21-25-16Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  minio-init:
+    image: minio/mc:RELEASE.2024-02-09T16-22-09Z
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until /usr/bin/mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 1; done;
+      /usr/bin/mc mb -p local/processed || true;
+      /usr/bin/mc anonymous set download local/processed || true;
+      "
+
+  feature-sink:
+    build: ./feature-sink
+    depends_on:
+      - kafka
+      - minio-init
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: streamforge.features.user_event_counts
+      KAFKA_GROUP_ID: streamforge-feature-minio-sink
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: processed
+      MINIO_PREFIX: streamforge/features
