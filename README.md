@@ -1,6 +1,6 @@
-# StreamForge AI Architecture
+# StreamForge AI
 
-## 1. Overview
+## Project Overview
 
 StreamForge AI is a real-time data pipeline platform for AI and analytics workloads. It focuses on:
 
@@ -9,7 +9,7 @@ StreamForge AI is a real-time data pipeline platform for AI and analytics worklo
 - object-storage-based data sinking
 - storage-aware prefetching for ML workloads
 
-## 2. Goals
+## Motivation
 
 - Provide a minimal but realistic open-source AI data pipeline
 - Support local development and demo environments
@@ -22,24 +22,24 @@ StreamForge AI is a real-time data pipeline platform for AI and analytics worklo
 - Large-scale distributed control plane
 - Enterprise authentication / authorization in v0.1
 
-## 4. High-level architecture
+## Architecture Summary
 
 ### 4.1 Ingestion layer
 Uses Debezium to capture row-level changes from MySQL/Postgres and publish them to Kafka topics.
 
 ### 4.2 Streaming layer
-Uses Apache Flink to:
+Planned: Uses Apache Flink to:
 - consume CDC events
 - perform cleaning and transformation
 - compute simple feature aggregations
 - write processed outputs to storage
 
 ### 4.3 Storage layer
-Uses MinIO as the initial object storage target.
+MinIO/S3-compatible storage is the initial storage target (and is optionally exercised by the prefetch demo).
 Future versions may support Iceberg table sinks for incremental analytics.
 
 ### 4.4 Prefetch layer
-A lightweight prefetch engine analyzes expected access patterns and pulls selected objects into a hot cache area before an ML job starts.
+A lightweight prefetch engine analyzes expected access patterns and pulls selected objects into a hot cache area before an ML job starts (implemented in `prefetch-engine/`).
 
 ## 5. Initial module boundaries
 
@@ -64,20 +64,30 @@ MinIO is simple for local demos and provides an S3-compatible interface.
 ### Why prefetch demo
 Prefetching is a practical optimization for AI pipelines with repeated object access and training cold starts.
 
-## 7. MVP scope
+## Core Features
 
-v0.1 will include:
-- MySQL CDC to Kafka
-- one Flink aggregation job
-- one MinIO sink
-- one end-to-end Docker Compose demo
+This repo focuses on an MVP demo set that illustrates the intended architecture:
+- MySQL -> Kafka CDC ingestion via Debezium (see `deploy/cdc-mysql-kafka-debezium/`)
+- Storage-aware prefetching demo for ML workloads (see `prefetch-engine/`)
+- Optional MinIO upload of processed outputs from the prefetch demo (see `prefetch-engine/README.md`)
 
-For the initial CDC demo, see `deploy/cdc-mysql-kafka-debezium/`.
+Planned next (not yet included as runnable code here):
+- A streaming/feature-generation job (e.g., with Apache Flink)
+- Additional storage sinks (e.g., Iceberg)
 
-## 8. Future improvements
+## Roadmap Links
+
+Track progress:
+- GitHub issues: https://github.com/iLvDallas/streamforge-ai/issues
+- GitHub projects (if/when populated): https://github.com/iLvDallas/streamforge-ai/projects
 
 - Iceberg sink support
 - schema evolution handling
 - metrics and observability
 - benchmark scenarios
 - training-job integration
+
+## Contribution Links
+- Contribution guide: [`CONTRIBUTING.md`](./CONTRIBUTING.md)
+- Start a topic/track progress: https://github.com/iLvDallas/streamforge-ai/issues/new/choose
+- Open PRs to `main`: https://github.com/iLvDallas/streamforge-ai/pulls
