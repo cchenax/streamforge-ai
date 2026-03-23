@@ -46,10 +46,15 @@ flink run target/stream-processor-0.1.0-SNAPSHOT.jar \
 ```
 
 ## Supported CDC fields
-The parser expects Debezium envelope and reads:
+The parser expects a Debezium-like envelope (JSON) and reads:
 - `payload.op` (counts only non-delete events),
-- `payload.ts_ms`,
-- `payload.after.user_id` or `payload.after.uid` or fallback `payload.after.id`.
+- `payload.ts_ms` (or falls back to `ts_ms` at the root, then `payload.source.ts_ms`),
+- `payload.after.user_id` or `payload.after.uid` or fallback `payload.after.id`,
+- additional identifier field aliases like `payload.after.userId` / `payload.after.userID`,
+- and (optionally) nested identifiers under `payload.after.user.*`.
+
+For schema evolution resilience, if the identifier field is renamed upstream, the parser will
+also fall back to the first top-level field that ends with `*_id`.
 
 ## Notes
 - This is an MVP processor intended for local/demo usage.
