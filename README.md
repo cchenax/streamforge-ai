@@ -79,7 +79,7 @@ Planned next (not yet included as runnable code here):
 
 Track progress:
 - GitHub issues: https://github.com/iLvDallas/streamforge-ai/issues
-- GitHub projects (if/when populated): https://github.com/iLvDallas/streamforge-ai/projects
+- GitHub projects (if/when populated): https://github.com/cchenax/streamforge-ai/projects
 
 - Iceberg sink support
 - schema evolution handling
