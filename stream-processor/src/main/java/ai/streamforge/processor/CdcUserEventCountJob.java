@@ -91,35 +91,125 @@ public class CdcUserEventCountJob {
     private static class ParseDebeziumEvent extends ProcessFunction<String, CdcUserEvent> {
         @Override
         public void processElement(String value, Context ctx, Collector<CdcUserEvent> out) throws Exception {
-            JsonNode root = MAPPER.readTree(value);
+            if (value == null) {
+                return;
+            }
+
+            String trimmed = value.trim();
+            if (trimmed.isEmpty() || "null".equals(trimmed)) {
+                return;
+            }
+
+            JsonNode root = MAPPER.readTree(trimmed);
             JsonNode payload = root.path("payload");
             if (payload.isMissingNode() || payload.isNull()) {
                 return;
             }
 
-            String op = payload.path("op").asText("");
-            if (op.isEmpty() || "d".equals(op)) {
-                // For this feature job we count create/update/read events only.
-                return;
-            }
-
+            // Debezium schema evolution messages can have a different envelope shape and may not
+            // include an "after" struct. For this feature job we only care about row-level changes.
             JsonNode after = payload.path("after");
             if (after.isMissingNode() || after.isNull()) {
                 return;
             }
 
-            // Try common user identifier fields first, then fallback to id.
-            String userId = firstNonEmpty(
-                    textOrEmpty(after, "user_id"),
-                    textOrEmpty(after, "uid"),
-                    textOrEmpty(after, "id")
+            String op = firstNonEmpty(
+                    textOrEmpty(payload, "op"),
+                    textOrEmpty(root, "op")
             );
+
+            // For this feature job we count create/update/read events only.
+            if (!("c".equals(op) || "u".equals(op) || "r".equals(op))) {
+                return;
+            }
+
+            String userId = extractUserId(after);
             if (userId.isEmpty()) {
                 return;
             }
 
-            long tsMs = payload.path("ts_ms").asLong(0L);
+            // ts_ms can be relocated across envelope versions; keep parsing tolerant.
+            long tsMs = parseTsMs(
+                    payload.path("ts_ms"),
+                    root.path("ts_ms"),
+                    payload.path("source").path("ts_ms")
+            );
+
             out.collect(new CdcUserEvent(userId, op, tsMs));
+        }
+
+        private static long parseTsMs(JsonNode... candidates) {
+            for (JsonNode n : candidates) {
+                if (n == null || n.isMissingNode() || n.isNull()) {
+                    continue;
+                }
+                if (n.isNumber()) {
+                    return n.asLong(0L);
+                }
+                if (n.isTextual()) {
+                    String s = n.asText("");
+                    if (s == null || s.isBlank()) {
+                        continue;
+                    }
+                    try {
+                        return Long.parseLong(s);
+                    } catch (NumberFormatException ignored) {
+                        // Keep trying next candidate.
+                    }
+                }
+            }
+            return 0L;
+        }
+
+        private String extractUserId(JsonNode after) {
+            // Try common user identifier fields first (field additions won't break this).
+            String fromDirectFields = firstNonEmpty(
+                    textOrEmpty(after, "user_id"),
+                    textOrEmpty(after, "uid"),
+                    textOrEmpty(after, "id"),
+                    textOrEmpty(after, "userId"),
+                    textOrEmpty(after, "USER_ID"),
+                    textOrEmpty(after, "userID")
+            );
+            if (!fromDirectFields.isEmpty()) {
+                return fromDirectFields;
+            }
+
+            // Example: if schema evolution nests identifiers under a "user" object.
+            JsonNode userNode = after.path("user");
+            if (!userNode.isMissingNode() && !userNode.isNull()) {
+                String fromUserNode = firstNonEmpty(
+                        textOrEmpty(userNode, "user_id"),
+                        textOrEmpty(userNode, "uid"),
+                        textOrEmpty(userNode, "id")
+                );
+                if (!fromUserNode.isEmpty()) {
+                    return fromUserNode;
+                }
+            }
+
+            // Last-resort heuristic: pick the first *_id field at the top-level.
+            // This keeps the pipeline running when upstream renamed the identifier field.
+            if (after.isObject()) {
+                var it = after.fieldNames();
+                while (it.hasNext()) {
+                    String fieldName = it.next();
+                    if (fieldName == null) {
+                        continue;
+                    }
+                    if (fieldName.endsWith("_id")) {
+                        JsonNode v = after.path(fieldName);
+                        if (v != null && !v.isMissingNode() && !v.isNull()) {
+                            String candidate = v.asText("");
+                            if (candidate != null && !candidate.isEmpty()) {
+                                return candidate;
+                            }
+                        }
+                    }
+                }
+            }
+
+            return "";
         }
 
         private String textOrEmpty(JsonNode node, String fieldName) {
