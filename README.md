@@ -43,12 +43,9 @@ A lightweight prefetch engine analyzes expected access patterns and pulls select
 
 ## 5. Initial module boundaries
 
-- `ingestion-service/`
 - `stream-processor/`
-- `storage-sink/`
 - `prefetch-engine/`
 - `deploy/`
-- `examples/`
 
 ## 6. Design decisions
 
