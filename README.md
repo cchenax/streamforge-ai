@@ -78,7 +78,7 @@ Planned next (not yet included as runnable code here):
 ## Roadmap Links
 
 Track progress:
-- GitHub issues: https://github.com/iLvDallas/streamforge-ai/issues
+- GitHub issues: https://github.com/cchenax/streamforge-ai/issues
 - GitHub projects (if/when populated): https://github.com/cchenax/streamforge-ai/projects
 
 - Iceberg sink support
