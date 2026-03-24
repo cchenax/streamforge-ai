@@ -1,0 +1,142 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: streamforge-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc -w 2 localhost 2181 | grep imok || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: streamforge-kafka
+    restart: unless-stopped
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 8s
+      retries: 15
+
+  mysql:
+    image: mysql:8.0
+    container_name: streamforge-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: streamforge
+      MYSQL_USER: debezium
+      MYSQL_PASSWORD: debezium
+      MYSQL_ROOT_PASSWORD: root
+    command:
+      [
+        "--server-id=184054",
+        "--log-bin=mysql-bin",
+        "--binlog-format=ROW",
+        "--binlog-row-image=FULL",
+        "--default-authentication-plugin=mysql_native_password"
+      ]
+    ports:
+      - "3306:3306"
+    volumes:
+      - ../cdc-mysql-kafka-debezium/mysql/init:/docker-entrypoint-initdb.d:ro
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -proot --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  debezium:
+    image: debezium/connect:2.5
+    container_name: streamforge-debezium
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: connect-debezium
+      CONFIG_STORAGE_TOPIC: connect-configs
+      OFFSET_STORAGE_TOPIC: connect-offsets
+      STATUS_STORAGE_TOPIC: connect-statuses
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_LOG4J_ROOT_LOGLEVEL: INFO
+    volumes:
+      - ../cdc-mysql-kafka-debezium/connector-config.json:/tmp/connector-config.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8083/connectors >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  connector-setup:
+    image: curlimages/curl:8.7.1
+    container_name: streamforge-connector-setup
+    depends_on:
+      debezium:
+        condition: service_healthy
+    volumes:
+      - ../cdc-mysql-kafka-debezium/connector-config.json:/connector-config.json:ro
+    command: >
+      sh -c '
+        curl -sS -X POST -H "Content-Type: application/json"
+        --data @/connector-config.json
+        http://debezium:8083/connectors || true;
+        echo "Debezium connector setup attempted."
+      '
+
+  minio:
+    image: minio/minio:RELEASE.2024-02-09T21-25-16Z
+    container_name: streamforge-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+volumes:
+  mysql_data:
+  minio_data:
