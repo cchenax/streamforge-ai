@@ -1,0 +1,87 @@
+{
+  "name": "Data Pipeline Workflow",
+  "description": "A workflow that demonstrates multi-agent collaboration for data processing",
+  "agents": [
+    {
+      "name": "data_ingestion_agent",
+      "type": "data_ingestion",
+      "config": {
+        "source": "mysql",
+        "connection_string": "mysql://user:password@localhost:3306/streamforge"
+      }
+    },
+    {
+      "name": "stream_processor_agent",
+      "type": "stream_processor",
+      "config": {
+        "framework": "flink",
+        "parallelism": 2
+      }
+    },
+    {
+      "name": "storage_sink_agent",
+      "type": "storage_sink",
+      "config": {
+        "storage": "minio",
+        "bucket": "processed",
+        "prefix": "streamforge"
+      }
+    },
+    {
+      "name": "prefetch_agent",
+      "type": "prefetch",
+      "config": {
+        "demo_dir": "/tmp/streamforge-demo",
+        "top_n": 3,
+        "job_id": "demo-job-123"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "agent": "data_ingestion_agent",
+      "action": "start_ingestion",
+      "input": {
+        "table": "user_events",
+        "columns": ["id", "user_id", "event_type", "created_at"]
+      },
+      "output_to": {
+        "stream_processor_agent": "ingestion_data"
+      },
+      "on_error": "continue"
+    },
+    {
+      "agent": "stream_processor_agent",
+      "action": "process_stream",
+      "input": {
+        "window_size": "5m",
+        "aggregations": ["count", "sum"]
+      },
+      "output_to": {
+        "storage_sink_agent": "processed_data"
+      },
+      "on_error": "continue"
+    },
+    {
+      "agent": "storage_sink_agent",
+      "action": "write_to_storage",
+      "input": {
+        "format": "ndjson",
+        "compression": "gzip"
+      },
+      "output_to": {
+        "prefetch_agent": "storage_result"
+      },
+      "on_error": "continue"
+    },
+    {
+      "agent": "prefetch_agent",
+      "action": "prefetch_data",
+      "input": {
+        "cache_size": "10GB",
+        "refresh_interval": "1h"
+      },
+      "on_error": "continue"
+    }
+  ]
+}
