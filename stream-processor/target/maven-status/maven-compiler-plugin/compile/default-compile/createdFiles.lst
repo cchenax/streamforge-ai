@@ -1,4 +1,0 @@
-ai/streamforge/processor/CdcUserEventCountJob.class
-ai/streamforge/processor/CdcUserEventCountJob$ParseDebeziumEvent.class
-ai/streamforge/processor/CdcUserEventCountJob$UserCountWindowAggregator.class
-ai/streamforge/processor/CdcUserEventCountJob$CdcUserEvent.class
