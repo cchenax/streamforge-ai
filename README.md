@@ -86,5 +86,5 @@ Track progress:
 
 ## Contribution Links
 - Contribution guide: [`CONTRIBUTING.md`](./CONTRIBUTING.md)
-- Start a topic/track progress: https://github.com/iLvDallas/streamforge-ai/issues/new/choose
-- Open PRs to `main`: https://github.com/iLvDallas/streamforge-ai/pulls
+- Start a topic/track progress: https://github.com/cchenax/streamforge-ai/issues/new/choose
+- Open PRs to `main`: https://github.com/cchenax/streamforge-ai/pulls
