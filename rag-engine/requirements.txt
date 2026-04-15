@@ -1,0 +1,7 @@
+chromadb
+sentence-transformers
+numpy
+pandas
+tqdm
+openai
+python-dotenv
