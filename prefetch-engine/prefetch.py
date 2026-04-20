@@ -8,6 +8,8 @@ from io import BytesIO
 from pathlib import Path
 from typing import List
 
+import metrics
+
 
 @dataclass
 class FileStat:
@@ -28,12 +30,22 @@ class FileStat:
 def select_hot_files(candidates: List[FileStat], top_n: int) -> List[FileStat]:
     """Select top-N hot files based on the score."""
     if top_n <= 0:
+        metrics.candidates_total.set(len(candidates))
+        metrics.hot_files_selected.set(0)
         return []
-    # Sort descending by score
-    return sorted(candidates, key=lambda c: c.score, reverse=True)[:top_n]
+    selected = sorted(candidates, key=lambda c: c.score, reverse=True)[:top_n]
+    metrics.candidates_total.set(len(candidates))
+    metrics.hot_files_selected.set(len(selected))
+    return selected
 
 
-def prefetch_files(hot_files: List[FileStat], cache_dir: Path, simulate_latency_s: float = 0.05) -> None:
+def prefetch_files(
+    hot_files: List[FileStat],
+    cache_dir: Path,
+    simulate_latency_s: float = 0.05,
+    *,
+    job_id: str = "unknown",
+) -> None:
     """
     Simulate prefetch by copying local files into a cache directory.
 
@@ -42,20 +54,25 @@ def prefetch_files(hot_files: List[FileStat], cache_dir: Path, simulate_latency_
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
 
+    t0 = time.time()
     for f in hot_files:
         src = Path(f.uri.replace("file://", ""))
         dst = cache_dir / src.name
 
         if not src.exists():
             # Skip missing files in the demo; in production this should be logged/alerted.
+            metrics.files_skipped_total.labels(job_id=job_id).inc()
             continue
 
         # Simulate remote IO latency
         time.sleep(simulate_latency_s)
         shutil.copy2(src, dst)
+        metrics.files_prefetched_total.labels(job_id=job_id).inc()
+
+    metrics.prefetch_duration_seconds.labels(job_id=job_id).observe(time.time() - t0)
 
 
-def run_simulated_ml_job(cache_dir: Path, hot_files: List[FileStat]) -> None:
+def run_simulated_ml_job(cache_dir: Path, hot_files: List[FileStat], *, job_id: str = "unknown") -> None:
     """
     Simulate an ML job that consumes prefetched files.
 
@@ -65,6 +82,7 @@ def run_simulated_ml_job(cache_dir: Path, hot_files: List[FileStat]) -> None:
     hits = 0
     misses = 0
 
+    t0 = time.time()
     for f in hot_files:
         src = Path(f.uri.replace("file://", ""))
         cached = cache_dir / src.name
@@ -73,9 +91,11 @@ def run_simulated_ml_job(cache_dir: Path, hot_files: List[FileStat]) -> None:
         else:
             misses += 1
 
-    print(f"[ML JOB] cache hits={hits}, misses={misses}, total={len(hot_files)}")
+    metrics.cache_hits_total.labels(job_id=job_id).inc(hits)
+    metrics.cache_misses_total.labels(job_id=job_id).inc(misses)
+    metrics.job_duration_seconds.labels(job_id=job_id).observe(time.time() - t0)
 
-    # Note: kept as printing only in the original demo.
+    print(f"[ML JOB] cache hits={hits}, misses={misses}, total={len(hot_files)}")
 
 
 @dataclass
@@ -171,6 +191,7 @@ def upload_processed_records_to_minio(records: List[ProcessedRecord]) -> str | N
 
     if not endpoint or not access_key or not secret_key:
         print("[MINIO] Skipping upload (set MINIO_ENDPOINT/MINIO_ACCESS_KEY/MINIO_SECRET_KEY to enable).")
+        metrics.minio_uploads_total.labels(status="skipped").inc()
         return None
 
     try:
@@ -204,6 +225,7 @@ def upload_processed_records_to_minio(records: List[ProcessedRecord]) -> str | N
     data_stream = BytesIO(payload)
     content_type = "application/x-ndjson"
 
+    t0 = time.time()
     client.put_object(
         bucket_name=bucket,
         object_name=object_key,
@@ -211,6 +233,8 @@ def upload_processed_records_to_minio(records: List[ProcessedRecord]) -> str | N
         length=len(payload),
         content_type=content_type,
     )
+    metrics.minio_upload_duration_seconds.observe(time.time() - t0)
+    metrics.minio_uploads_total.labels(status="success").inc()
 
     print(f"[MINIO] Uploaded processed records to bucket={bucket} key={object_key}")
     return object_key
@@ -256,9 +280,12 @@ def main() -> None:
     - prefetch into cache
     - run a simulated ML job
     """
+    metrics.start_metrics_server()
+
     base = Path(os.environ.get("STREAMFORGE_DEMO_DIR", "/tmp/streamforge-demo"))
     manifest_dir = base / "manifest"
     cache_dir = base / "prefetch-cache"
+    job_id = os.environ.get("STREAMFORGE_JOB_ID", _utc_run_id())
 
     print(f"[DEMO] using base directory: {base}")
 
@@ -270,16 +297,16 @@ def main() -> None:
         print(f"  - {f.uri} (recent_access_count={f.recent_access_count})")
 
     print(f"[DEMO] prefetching into cache: {cache_dir}")
-    prefetch_files(hot_files, cache_dir)
+    prefetch_files(hot_files, cache_dir, job_id=job_id)
 
     print("[DEMO] running simulated ML job")
-    job_id = os.environ.get("STREAMFORGE_JOB_ID", _utc_run_id())
-    # Keep the original cache hit/miss reporting.
-    run_simulated_ml_job(cache_dir, hot_files)
+    run_simulated_ml_job(cache_dir, hot_files, job_id=job_id)
 
     # Build and upload processed outputs (NDJSON).
     records = build_processed_records(job_id=job_id, cache_dir=cache_dir, hot_files=hot_files)
     upload_processed_records_to_minio(records)
+
+    metrics.push_metrics(job_id)
 
 
 if __name__ == "__main__":
