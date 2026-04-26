@@ -1,3 +1,5 @@
+
+
 # StreamForge AI
 
 ## Project Overview
@@ -28,7 +30,7 @@ StreamForge AI is a real-time data pipeline platform for AI and analytics worklo
 Uses Debezium to capture row-level changes from MySQL/Postgres and publish them to Kafka topics.
 
 ### 4.2 Streaming layer
-Planned: Uses Apache Flink to:
+Uses Apache Flink to:
 - consume CDC events
 - perform cleaning and transformation
 - compute simple feature aggregations
@@ -65,26 +67,40 @@ Prefetching is a practical optimization for AI pipelines with repeated object ac
 
 This repo focuses on an MVP demo set that illustrates the intended architecture:
 - MySQL -> Kafka CDC ingestion via Debezium (see `deploy/cdc-mysql-kafka-debezium/`)
+- End-to-end demo: MySQL -> Debezium -> Kafka -> Flink -> MinIO (see `deploy/cdc-flink-minio-demo/`)
 - Storage-aware prefetching demo for ML workloads (see `prefetch-engine/`)
 - Optional MinIO upload of processed outputs from the prefetch demo (see `prefetch-engine/README.md`)
 
-Planned next (not yet included as runnable code here):
-- A streaming/feature-generation job (e.g., with Apache Flink)
+Planned next:
 - Additional storage sinks (e.g., Iceberg)
+- Metrics and observability
+- Benchmark scenarios
 
-## Roadmap Links
+## Roadmap
 
-Track progress:
+### v0.1 Local demo (MVP)
+- [x] Storage-aware prefetch demo (`prefetch-engine/`)
+- [x] MySQL -> Kafka CDC ingestion via Debezium (`deploy/cdc-mysql-kafka-debezium/`)
+- [x] End-to-end demo: MySQL -> Debezium -> Kafka -> Flink -> MinIO (`deploy/cdc-flink-minio-demo/`)
+- [x] Runnable local stack (Docker Compose) for the full demo (`deploy/cdc-flink-minio-demo/docker-compose.yml`)
+
+### v0.2 Streaming + sinks
+- [x] Flink stream processor job + example (`stream-processor/`)
+- [x] MinIO/S3 sink with an output layout and naming conventions (`deploy/cdc-flink-minio-demo/feature-sink/`)
+- [ ] Iceberg sink support (optional)
+
+### v0.3 Hardening + integrations
+- [ ] Schema evolution handling
+- [ ] Metrics and observability
+- [ ] Benchmark scenarios
+- [ ] Training-job integration example
+
+### Roadmap Links
 - GitHub issues: https://github.com/cchenax/streamforge-ai/issues
 - GitHub projects (if/when populated): https://github.com/cchenax/streamforge-ai/projects
-
-- Iceberg sink support
-- schema evolution handling
-- metrics and observability
-- benchmark scenarios
-- training-job integration
 
 ## Contribution Links
 - Contribution guide: [`CONTRIBUTING.md`](./CONTRIBUTING.md)
 - Start a topic/track progress: https://github.com/cchenax/streamforge-ai/issues/new/choose
 - Open PRs to `main`: https://github.com/cchenax/streamforge-ai/pulls
+
