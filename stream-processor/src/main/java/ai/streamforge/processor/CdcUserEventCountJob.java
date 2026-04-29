@@ -1,8 +1,11 @@
 package ai.streamforge.processor;
 
-import ai.streamforge.processor.deserialization.CdcEventDeserializationSchema;
+import ai.streamforge.processor.deserialization.SchemaAwareCdcDeserializationSchema;
+import ai.streamforge.processor.deserialization.SchemaEvolutionFilter;
 import ai.streamforge.processor.model.CdcEvent;
+import ai.streamforge.processor.model.DeadLetterEvent;
 import ai.streamforge.processor.model.UserEventCount;
+import ai.streamforge.processor.serialization.DeadLetterEventSerializationSchema;
 import ai.streamforge.processor.serialization.UserEventCountSerializationSchema;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.AggregateFunction;
@@ -11,6 +14,7 @@ import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
@@ -34,6 +38,7 @@ import java.time.Duration;
  *   <li>{@code KAFKA_BOOTSTRAP_SERVERS}  — default {@code localhost:9092}</li>
  *   <li>{@code KAFKA_SOURCE_TOPIC}       — default {@code cdc.streamforge.user_events}</li>
  *   <li>{@code KAFKA_SINK_TOPIC}         — default {@code user.event.counts}</li>
+ *   <li>{@code KAFKA_DLQ_TOPIC}          — default {@code cdc.dead.letter}; set empty to disable</li>
  *   <li>{@code KAFKA_CONSUMER_GROUP}     — default {@code flink-cdc-user-event-count}</li>
  *   <li>{@code WINDOW_SIZE_SECONDS}      — default {@code 60}</li>
  *   <li>{@code OUT_OF_ORDERNESS_SECONDS} — default {@code 5}</li>
@@ -44,18 +49,18 @@ public class CdcUserEventCountJob {
     private static final Logger LOG = LoggerFactory.getLogger(CdcUserEventCountJob.class);
 
     public static void main(String[] args) throws Exception {
-        String bootstrapServers    = env("KAFKA_BOOTSTRAP_SERVERS",  "localhost:9092");
-        String sourceTopic         = env("KAFKA_SOURCE_TOPIC",       "cdc.streamforge.user_events");
-        String sinkTopic           = env("KAFKA_SINK_TOPIC",         "user.event.counts");
-        String consumerGroup       = env("KAFKA_CONSUMER_GROUP",     "flink-cdc-user-event-count");
-        long   windowSizeSeconds   = Long.parseLong(env("WINDOW_SIZE_SECONDS",      "60"));
+        String bootstrapServers      = env("KAFKA_BOOTSTRAP_SERVERS",  "localhost:9092");
+        String sourceTopic           = env("KAFKA_SOURCE_TOPIC",       "cdc.streamforge.user_events");
+        String sinkTopic             = env("KAFKA_SINK_TOPIC",         "user.event.counts");
+        String dlqTopic              = env("KAFKA_DLQ_TOPIC",          "cdc.dead.letter");
+        String consumerGroup         = env("KAFKA_CONSUMER_GROUP",     "flink-cdc-user-event-count");
+        long   windowSizeSeconds     = Long.parseLong(env("WINDOW_SIZE_SECONDS",      "60"));
         long   outOfOrdernessSeconds = Long.parseLong(env("OUT_OF_ORDERNESS_SECONDS", "5"));
 
-        LOG.info("Starting CdcUserEventCountJob: source={}, sink={}, window={}s",
-                sourceTopic, sinkTopic, windowSizeSeconds);
+        LOG.info("Starting CdcUserEventCountJob: source={}, sink={}, dlq={}, window={}s",
+                sourceTopic, sinkTopic, dlqTopic.isBlank() ? "disabled" : dlqTopic, windowSizeSeconds);
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        // Checkpoint every 30 s for exactly-once semantics with Kafka.
         env.enableCheckpointing(30_000);
 
         KafkaSource<CdcEvent> source = KafkaSource.<CdcEvent>builder()
@@ -63,19 +68,39 @@ public class CdcUserEventCountJob {
                 .setTopics(sourceTopic)
                 .setGroupId(consumerGroup)
                 .setStartingOffsets(OffsetsInitializer.earliest())
-                .setValueOnlyDeserializer(new CdcEventDeserializationSchema())
+                .setValueOnlyDeserializer(new SchemaAwareCdcDeserializationSchema())
                 .build();
 
         WatermarkStrategy<CdcEvent> watermarkStrategy = WatermarkStrategy
                 .<CdcEvent>forBoundedOutOfOrderness(Duration.ofSeconds(outOfOrdernessSeconds))
                 .withTimestampAssigner((event, recordTimestamp) -> event.tsMs)
-                // Mark partition idle after 1 min so watermarks can advance
-                // even when some Kafka partitions receive no data.
                 .withIdleness(Duration.ofMinutes(1));
 
-        DataStream<UserEventCount> counts = env
+        // ── Schema evolution filter + dead-letter routing ────────────────────
+        SingleOutputStreamOperator<CdcEvent> filteredEvents = env
                 .fromSource(source, watermarkStrategy, "Kafka CDC Source")
-                // Only count new inserts; ignore updates, deletes, and snapshot reads.
+                .process(new SchemaEvolutionFilter())
+                .name("Schema Evolution Filter");
+
+        DataStream<DeadLetterEvent> deadLetters =
+                filteredEvents.getSideOutput(SchemaEvolutionFilter.DLQ_TAG);
+
+        if (!dlqTopic.isBlank()) {
+            KafkaSink<DeadLetterEvent> dlqSink = KafkaSink.<DeadLetterEvent>builder()
+                    .setBootstrapServers(bootstrapServers)
+                    .setRecordSerializer(
+                            KafkaRecordSerializationSchema.<DeadLetterEvent>builder()
+                                    .setTopic(dlqTopic)
+                                    .setValueSerializationSchema(new DeadLetterEventSerializationSchema())
+                                    .build()
+                    ).build();
+            deadLetters.sinkTo(dlqSink).name("Kafka DLQ: " + dlqTopic);
+        } else {
+            deadLetters.print().name("DLQ Log");
+        }
+
+        // ── Main aggregation pipeline ────────────────────────────────────────
+        DataStream<UserEventCount> counts = filteredEvents
                 .filter(e -> "c".equals(e.op) && e.after != null && e.after.userId != null)
                 .name("Filter: inserts only")
                 .keyBy(e -> e.after.userId)
