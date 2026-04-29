@@ -16,6 +16,8 @@
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <flink.version>1.18.1</flink.version>
+        <iceberg.version>1.5.2</iceberg.version>
+        <hadoop.version>3.3.4</hadoop.version>
         <jackson.version>2.17.2</jackson.version>
         <junit.version>5.10.2</junit.version>
     </properties>
@@ -58,6 +60,40 @@
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
             <version>${jackson.version}</version>
+        </dependency>
+
+        <!-- Iceberg Flink sink (optional at runtime; enable with ICEBERG_ENABLED=true) -->
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-flink-runtime-1.18</artifactId>
+            <version>${iceberg.version}</version>
+        </dependency>
+        <!-- Flink Table API types (RowData, GenericRowData, StringData) — on the cluster -->
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-table-common</artifactId>
+            <version>${flink.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <!-- Hadoop filesystem support: Iceberg HadoopCatalog + S3A for MinIO -->
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-common</artifactId>
+            <version>${hadoop.version}</version>
+            <scope>provided</scope>
+            <exclusions>
+                <exclusion><groupId>log4j</groupId><artifactId>log4j</artifactId></exclusion>
+                <exclusion><groupId>org.slf4j</groupId><artifactId>slf4j-log4j12</artifactId></exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-aws</artifactId>
+            <version>${hadoop.version}</version>
+            <exclusions>
+                <exclusion><groupId>log4j</groupId><artifactId>log4j</artifactId></exclusion>
+                <exclusion><groupId>org.slf4j</groupId><artifactId>slf4j-log4j12</artifactId></exclusion>
+            </exclusions>
         </dependency>
 
         <!-- Logging — provided by the Flink cluster at runtime -->
@@ -105,6 +141,16 @@
                         </goals>
                         <configuration>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/LICENSE*</exclude>
+                                        <exclude>META-INF/NOTICE*</exclude>
+                                        <exclude>META-INF/DEPENDENCIES</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>ai.streamforge.processor.CdcUserEventCountJob</mainClass>

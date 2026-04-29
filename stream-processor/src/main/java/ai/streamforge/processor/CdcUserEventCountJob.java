@@ -4,6 +4,7 @@ import ai.streamforge.processor.deserialization.CdcEventDeserializationSchema;
 import ai.streamforge.processor.model.CdcEvent;
 import ai.streamforge.processor.model.UserEventCount;
 import ai.streamforge.processor.serialization.UserEventCountSerializationSchema;
+import ai.streamforge.processor.sink.IcebergSinkFactory;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.AggregateFunction;
 import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
@@ -37,6 +38,18 @@ import java.time.Duration;
  *   <li>{@code KAFKA_CONSUMER_GROUP}     — default {@code flink-cdc-user-event-count}</li>
  *   <li>{@code WINDOW_SIZE_SECONDS}      — default {@code 60}</li>
  *   <li>{@code OUT_OF_ORDERNESS_SECONDS} — default {@code 5}</li>
+ * </ul>
+ *
+ * <p>Optional Apache Iceberg sink (set {@code ICEBERG_ENABLED=true} to activate):
+ * <ul>
+ *   <li>{@code ICEBERG_ENABLED}       — default {@code false}</li>
+ *   <li>{@code ICEBERG_CATALOG_TYPE}  — {@code hadoop} (default), {@code hive}, or {@code rest}</li>
+ *   <li>{@code ICEBERG_WAREHOUSE}     — default {@code file:///tmp/iceberg-warehouse}</li>
+ *   <li>{@code ICEBERG_DATABASE}      — default {@code streamforge}</li>
+ *   <li>{@code ICEBERG_TABLE}         — default {@code user_event_counts}</li>
+ *   <li>{@code ICEBERG_S3_ENDPOINT}   — S3/MinIO endpoint, e.g. {@code http://minio:9000}</li>
+ *   <li>{@code ICEBERG_S3_ACCESS_KEY} — S3/MinIO access key</li>
+ *   <li>{@code ICEBERG_S3_SECRET_KEY} — S3/MinIO secret key</li>
  * </ul>
  */
 public class CdcUserEventCountJob {
@@ -94,6 +107,22 @@ public class CdcUserEventCountJob {
                 .build();
 
         counts.sinkTo(sink).name("Kafka Sink: " + sinkTopic);
+
+        // ── Optional Iceberg sink ────────────────────────────────────────────
+        if (Boolean.parseBoolean(env("ICEBERG_ENABLED", "false"))) {
+            String catalogType  = env("ICEBERG_CATALOG_TYPE",  "hadoop");
+            String warehouse    = env("ICEBERG_WAREHOUSE",     "file:///tmp/iceberg-warehouse");
+            String database     = env("ICEBERG_DATABASE",      "streamforge");
+            String icebergTable = env("ICEBERG_TABLE",         "user_event_counts");
+            String s3Endpoint   = env("ICEBERG_S3_ENDPOINT",   "");
+            String s3AccessKey  = env("ICEBERG_S3_ACCESS_KEY", "");
+            String s3SecretKey  = env("ICEBERG_S3_SECRET_KEY", "");
+
+            LOG.info("Iceberg sink enabled: catalog={}, warehouse={}, table={}.{}",
+                    catalogType, warehouse, database, icebergTable);
+            IcebergSinkFactory.attach(counts, catalogType, warehouse, database, icebergTable,
+                    s3Endpoint, s3AccessKey, s3SecretKey);
+        }
 
         env.execute("CdcUserEventCountJob");
     }
