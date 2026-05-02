@@ -23,6 +23,12 @@ public class CdcEvent {
     /** Row state after the change — null for deletes. */
     public UserEventRow after;
 
+    /**
+     * Schema version detected by {@link ai.streamforge.processor.deserialization.SchemaEvolutionHandler}.
+     * Transient — not serialized to Kafka or persisted in Flink state.
+     */
+    public transient SchemaVersion schemaVersion = SchemaVersion.UNKNOWN;
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class UserEventRow {
 
@@ -35,5 +41,13 @@ public class CdcEvent {
         /** Application-level event timestamp (milliseconds since epoch). */
         @JsonProperty("created_at")
         public Long createdAt;
+
+        /** V2+: browser/app session identifier (nullable). */
+        @JsonProperty("session_id")
+        public String sessionId;
+
+        /** V2+: client IP address (nullable). */
+        @JsonProperty("ip_address")
+        public String ipAddress;
     }
 }
