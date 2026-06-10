@@ -1,0 +1,28 @@
+{
+  "namespace": "ai.streamforge.processor",
+  "type": "record",
+  "name": "UserEventCount",
+  "doc": "Aggregated insert-event count for one user within a tumbling time window.",
+  "fields": [
+    {
+      "name": "user_id",
+      "type": "string",
+      "doc": "User identifier (join key)."
+    },
+    {
+      "name": "event_count",
+      "type": "long",
+      "doc": "Number of insert events in the window."
+    },
+    {
+      "name": "window_start_ms",
+      "type": "long",
+      "doc": "Inclusive window start — milliseconds since Unix epoch."
+    },
+    {
+      "name": "window_end_ms",
+      "type": "long",
+      "doc": "Exclusive window end — milliseconds since Unix epoch."
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+project: streamforge
+registry: registry.json
+provider: local
+
+online_store:
+  type: redis
+  host: localhost
+  port: 6379
+  db: 0
+
+offline_store:
+  type: minio
+  endpoint: localhost:9000
+  access_key: minioadmin
+  secret_key: minioadmin
+  bucket: processed
+  prefix: streamforge/features

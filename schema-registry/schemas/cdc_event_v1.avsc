@@ -1,0 +1,36 @@
+{
+  "namespace": "ai.streamforge.processor",
+  "type": "record",
+  "name": "CdcEvent",
+  "doc": "Debezium CDC event envelope — V1 (user_id, event_type, created_at only).",
+  "fields": [
+    {
+      "name": "op",
+      "type": "string",
+      "doc": "Debezium operation code: c=create, u=update, d=delete, r=snapshot-read."
+    },
+    {
+      "name": "ts_ms",
+      "type": "long",
+      "doc": "Debezium processing timestamp — milliseconds since Unix epoch."
+    },
+    {
+      "name": "after",
+      "type": [
+        "null",
+        {
+          "type": "record",
+          "name": "UserEventRow",
+          "doc": "Row state after the change; null for deletes.",
+          "fields": [
+            {"name": "user_id",    "type": "string"},
+            {"name": "event_type", "type": "string"},
+            {"name": "created_at", "type": ["null", "long"], "default": null,
+             "doc": "Application-level event timestamp (ms since epoch); null when absent."}
+          ]
+        }
+      ],
+      "default": null
+    }
+  ]
+}

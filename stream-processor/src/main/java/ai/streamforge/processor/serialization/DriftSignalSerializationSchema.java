@@ -1,10 +1,10 @@
 package ai.streamforge.processor.serialization;
 
-import ai.streamforge.processor.model.DriftSignal;
+import ai.streamforge.processor.drift.DriftSignal;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 
-/** Serializes {@link DriftSignal} to JSON bytes for the drift Kafka topic. */
+/** Serializes {@link DriftSignal} to JSON bytes for the Kafka drift-signals sink. */
 public class DriftSignalSerializationSchema implements SerializationSchema<DriftSignal> {
 
     private static final long serialVersionUID = 1L;

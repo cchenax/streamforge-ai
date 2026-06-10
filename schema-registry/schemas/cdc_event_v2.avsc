@@ -1,0 +1,40 @@
+{
+  "namespace": "ai.streamforge.processor",
+  "type": "record",
+  "name": "CdcEvent",
+  "doc": "Debezium CDC event envelope — V2 adds session_id and ip_address. BACKWARD-compatible with V1.",
+  "fields": [
+    {
+      "name": "op",
+      "type": "string",
+      "doc": "Debezium operation code: c=create, u=update, d=delete, r=snapshot-read."
+    },
+    {
+      "name": "ts_ms",
+      "type": "long",
+      "doc": "Debezium processing timestamp — milliseconds since Unix epoch."
+    },
+    {
+      "name": "after",
+      "type": [
+        "null",
+        {
+          "type": "record",
+          "name": "UserEventRow",
+          "doc": "Row state after the change; null for deletes.",
+          "fields": [
+            {"name": "user_id",    "type": "string"},
+            {"name": "event_type", "type": "string"},
+            {"name": "created_at", "type": ["null", "long"],   "default": null,
+             "doc": "Application-level event timestamp (ms); null when absent."},
+            {"name": "session_id", "type": ["null", "string"], "default": null,
+             "doc": "V2+: browser/app session identifier."},
+            {"name": "ip_address", "type": ["null", "string"], "default": null,
+             "doc": "V2+: client IP address (IPv4 or IPv6)."}
+          ]
+        }
+      ],
+      "default": null
+    }
+  ]
+}

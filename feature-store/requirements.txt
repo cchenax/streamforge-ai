@@ -1,0 +1,9 @@
+# Runtime — all optional; the store falls back to in-memory stubs when absent
+minio>=7.2.0          # offline store (MinIO / S3-compatible)
+redis>=5.0.0          # online store
+pandas>=2.0.0         # to_df() on FeatureVector / RetrievalJob
+pyarrow>=14.0.0       # to_arrow() on RetrievalJob
+pyyaml>=6.0.0         # feature_store.yaml config parsing
+
+# Dev / test
+pytest>=8.0.0

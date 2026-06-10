@@ -1,0 +1,42 @@
+{
+  "namespace": "ai.streamforge.processor",
+  "type": "record",
+  "name": "CdcEvent",
+  "doc": "Debezium CDC event envelope — V3 adds metadata JSON blob. BACKWARD-compatible with V1 and V2.",
+  "fields": [
+    {
+      "name": "op",
+      "type": "string",
+      "doc": "Debezium operation code: c=create, u=update, d=delete, r=snapshot-read."
+    },
+    {
+      "name": "ts_ms",
+      "type": "long",
+      "doc": "Debezium processing timestamp — milliseconds since Unix epoch."
+    },
+    {
+      "name": "after",
+      "type": [
+        "null",
+        {
+          "type": "record",
+          "name": "UserEventRow",
+          "doc": "Row state after the change; null for deletes.",
+          "fields": [
+            {"name": "user_id",    "type": "string"},
+            {"name": "event_type", "type": "string"},
+            {"name": "created_at", "type": ["null", "long"],   "default": null,
+             "doc": "Application-level event timestamp (ms); null when absent."},
+            {"name": "session_id", "type": ["null", "string"], "default": null,
+             "doc": "V2+: browser/app session identifier."},
+            {"name": "ip_address", "type": ["null", "string"], "default": null,
+             "doc": "V2+: client IP address (IPv4 or IPv6)."},
+            {"name": "metadata",   "type": ["null", "string"], "default": null,
+             "doc": "V3+: arbitrary JSON metadata blob; stored as a string."}
+          ]
+        }
+      ],
+      "default": null
+    }
+  ]
+}

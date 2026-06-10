@@ -1,0 +1,11 @@
+# Core — required for SchemaRegistryClient HTTP calls
+requests>=2.31.0
+
+# Avro encoding/decoding (Confluent wire format)
+fastavro>=1.9.0
+
+# YAML config loading (optional — only needed for from_yaml())
+pyyaml>=6.0.0
+
+# Dev / test
+pytest>=8.0.0
