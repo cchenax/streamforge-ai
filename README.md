@@ -131,6 +131,18 @@ Planned next:
 - [ ] Audit logging (API, job, and data access events)
 - [ ] High-availability mode for control plane & critical services
 
+### v0.9 AI/RAG & agent workloads
+- [ ] First-class RAG pipeline template (ingest → embed → index → retrieve) on top of `rag-engine/`
+- [ ] Pluggable embedding model adapters (local, OpenAI-compatible, HuggingFace) with batching
+- [ ] Vector store sinks (pgvector, Qdrant, Milvus) alongside existing Iceberg/MinIO sinks
+- [ ] Hybrid retrieval (BM25 + vector) with reranker hooks
+- [ ] Agent workflow orchestration examples (`agent-workflow/`) wired to streaming features
+- [ ] Tool/function-calling integration with control-plane API for pipeline actions
+- [ ] Streaming-to-RAG freshness SLOs (latency/lag dashboards per index)
+- [ ] LLM-output evaluation harness (groundedness, hallucination, retrieval recall) + benchmarks
+- [ ] PII/safety filters on ingestion and retrieval paths
+- [ ] Cost/token telemetry for embedding + inference per pipeline
+
 ### Roadmap Links
 - GitHub issues: https://github.com/cchenax/streamforge-ai/issues
 - GitHub projects (if/when populated): https://github.com/cchenax/streamforge-ai/projects
