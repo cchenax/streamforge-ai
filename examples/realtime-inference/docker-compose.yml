@@ -1,0 +1,78 @@
+# StreamForge AI — Real-time Inference Pipeline Demo
+#
+# Topology
+# --------
+#   Kafka ──► [InferencePipelineJob (Flink)] ──► model-server ──► Kafka
+#
+# Usage
+# -----
+#   # Standalone (model server + demo runner only, no upstream Flink job):
+#   docker compose up --build
+#
+#   # Full pipeline (extends the CDC → Flink stack):
+#   docker compose \
+#     -f deploy/cdc-flink-minio-demo/docker-compose.yml \
+#     -f examples/realtime-inference/docker-compose.yml \
+#     up
+
+services:
+
+  # ── Kafka (single-node KRaft — no ZooKeeper) ─────────────────────────────
+  kafka:
+    image: apache/kafka:3.7.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── Model server ──────────────────────────────────────────────────────────
+  model-server:
+    build:
+      context: ../../
+      dockerfile: examples/realtime-inference/Dockerfile
+    environment:
+      MODEL_SERVER_PORT: 8080
+      MODEL_LOW_THRESHOLD: ${MODEL_LOW_THRESHOLD:-5}
+      MODEL_MEDIUM_THRESHOLD: ${MODEL_MEDIUM_THRESHOLD:-20}
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Demo runner (produces synthetic data, calls model server, prints report)
+  demo:
+    build:
+      context: ../../
+      dockerfile: examples/realtime-inference/Dockerfile
+    depends_on:
+      kafka:
+        condition: service_healthy
+      model-server:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_SOURCE_TOPIC: user.event.counts
+      KAFKA_SINK_TOPIC: user.event.predictions
+      MODEL_SERVER_URL: http://model-server:8080/predict
+      MODEL_SERVER_TIMEOUT_S: "2"
+    command: >
+      python examples/realtime-inference/demo.py
+        --records ${DEMO_RECORDS:-200}
+        --window  ${DEMO_WINDOW_S:-60}
+    restart: "no"
